@@ -345,6 +345,13 @@ resource "aws_cloudfront_distribution" "default" {
   tags = module.this.tags
 
   depends_on = [module.logs]
+
+  lifecycle {
+    precondition {
+      condition     = var.origin_type != "vpc" || var.vpc_origin_config != null
+      error_message = "`vpc_origin_config` must be set when `origin_type` is \"vpc\"."
+    }
+  }
 }
 
 resource "aws_cloudfront_monitoring_subscription" "default" {

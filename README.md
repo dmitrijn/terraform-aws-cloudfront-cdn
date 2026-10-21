@@ -100,7 +100,7 @@ aws acm request-certificate --domain-name example.com --subject-alternative-name
 
 | Name | Version |
 | ---- | ------- |
-| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.5 |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.2 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 6.28.0 |
 | <a name="requirement_local"></a> [local](#requirement\_local) | >= 1.2 |
 

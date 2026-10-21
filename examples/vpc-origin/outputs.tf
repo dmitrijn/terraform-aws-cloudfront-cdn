@@ -15,5 +15,5 @@ output "vpc_origin_id" {
 
 output "alb_dns_name" {
   description = "DNS name of the internal ALB used as the VPC origin"
-  value       = aws_lb.internal.dns_name
+  value       = module.alb.alb_dns_name
 }

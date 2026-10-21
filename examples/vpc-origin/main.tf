@@ -6,20 +6,35 @@ provider "aws" {
 # Private origin: an internal ALB reachable only via a CloudFront VPC origin
 # -----------------------------------------------------------------------------
 
-data "aws_vpc" "default" {
-  default = true
+module "vpc" {
+  source  = "cloudposse/vpc/aws"
+  version = "3.0.0"
+
+  ipv4_primary_cidr_block = var.vpc_cidr_block
+
+  context = module.this.context
 }
 
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
+module "subnets" {
+  source  = "cloudposse/dynamic-subnets/aws"
+  version = "3.1.1"
+
+  availability_zones   = var.availability_zones
+  vpc_id               = module.vpc.vpc_id
+  igw_id               = [module.vpc.igw_id]
+  ipv4_cidr_block      = [module.vpc.vpc_cidr_block]
+  nat_gateway_enabled  = false
+  nat_instance_enabled = false
+
+  context = module.this.context
 }
 
+# The ALB only accepts traffic from CloudFront. The module's own security group is
+# disabled because it always opens HTTP to `http_ingress_cidr_blocks`.
 resource "aws_security_group" "alb" {
   name_prefix = "${module.this.id}-"
-  vpc_id      = data.aws_vpc.default.id
+  description = "Allows HTTP from CloudFront VPC origins only"
+  vpc_id      = module.vpc.vpc_id
 
   tags = module.this.tags
 }
@@ -37,7 +52,7 @@ resource "aws_vpc_security_group_egress_rule" "alb_all_outbound" {
 # traffic from it.
 # https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html
 data "aws_security_group" "cloudfront_vpc_origins" {
-  vpc_id = data.aws_vpc.default.id
+  vpc_id = module.vpc.vpc_id
   name   = "CloudFront-VPCOrigins-Service-SG"
 
   depends_on = [aws_cloudfront_vpc_origin.this]
@@ -53,34 +68,19 @@ resource "aws_vpc_security_group_ingress_rule" "alb_from_cloudfront_vpc_origins"
   tags = module.this.tags
 }
 
-resource "aws_lb" "internal" {
-  name               = module.this.id
-  internal           = true
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb.id]
-  subnets            = data.aws_subnets.default.ids
+module "alb" {
+  source  = "cloudposse/alb/aws"
+  version = "2.5.0"
 
-  tags = module.this.tags
-}
+  vpc_id                 = module.vpc.vpc_id
+  subnet_ids             = module.subnets.private_subnet_ids
+  internal               = true
+  http_enabled           = true
+  access_logs_enabled    = false
+  security_group_enabled = false
+  security_group_ids     = [aws_security_group.alb.id]
 
-resource "aws_lb_target_group" "internal" {
-  name     = module.this.id
-  port     = 80
-  protocol = "HTTP"
-  vpc_id   = data.aws_vpc.default.id
-
-  tags = module.this.tags
-}
-
-resource "aws_lb_listener" "internal" {
-  load_balancer_arn = aws_lb.internal.arn
-  port              = 80
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.internal.arn
-  }
+  context = module.this.context
 }
 
 # -----------------------------------------------------------------------------
@@ -90,7 +90,7 @@ resource "aws_lb_listener" "internal" {
 resource "aws_cloudfront_vpc_origin" "this" {
   vpc_origin_endpoint_config {
     name                   = module.this.id
-    arn                    = aws_lb.internal.arn
+    arn                    = module.alb.alb_arn
     http_port              = 80
     https_port             = 443
     origin_protocol_policy = "http-only"
@@ -111,7 +111,7 @@ resource "aws_cloudfront_vpc_origin" "this" {
 module "cdn" {
   source = "../../"
 
-  origin_domain_name = aws_lb.internal.dns_name
+  origin_domain_name = module.alb.alb_dns_name
   origin_type        = "vpc"
   logging_enabled    = var.logging_enabled
 
